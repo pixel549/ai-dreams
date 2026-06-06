@@ -44,7 +44,7 @@ def main():
         gemini_key = os.environ["GEMINI_API_KEY"]
         url = (
             "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"gemini-1.5-flash:generateContent?key={gemini_key}"
+            f"gemini-2.5-flash:generateContent?key={gemini_key}"
         )
         payload = {
             "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
