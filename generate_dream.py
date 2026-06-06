@@ -96,12 +96,12 @@ def post_with_retry(url, retries=4, delay=15, **kwargs):
     return r
 
 
-def openai_compat(url, api_key, model, system_prompt, temperature=2.0):
+def openai_compat(url, api_key, model, system_prompt, user_content=".", temperature=2.0):
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": "."},
+            {"role": "user", "content": user_content},
         ],
         "temperature": temperature,
         "max_tokens": MAX_TOKENS,
@@ -129,10 +129,14 @@ def dream_gemini(system_prompt):
         "generationConfig": {
             "temperature": 2.0,
             "maxOutputTokens": MAX_TOKENS,
+            "thinkingConfig": {"thinkingBudget": 0},  # disable thinking tokens
         },
     }
     r = post_with_retry(url, json=payload)
-    return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+    parts = r.json()["candidates"][0]["content"]["parts"]
+    # grab the first non-thought part
+    text = next(p["text"] for p in parts if not p.get("thought", False))
+    return text
 
 
 def dream_groq(system_prompt):
@@ -145,12 +149,14 @@ def dream_groq(system_prompt):
     )
 
 
-def dream_cerebras(system_prompt):
+def dream_cerebras(substrate):
+    # cerebras ignores system prompt — put substrate in user message instead
     return openai_compat(
         "https://api.cerebras.ai/v1/chat/completions",
         os.environ["CEREBRAS_API_KEY"],
         "gpt-oss-120b",
-        system_prompt,
+        system_prompt=SYSTEM_PROMPT_BASE,
+        user_content=substrate,
         temperature=1.5,
     )
 
@@ -178,22 +184,31 @@ def main():
     for name in ("gemini", "groq", "cerebras", "mistral"):
         os.makedirs(f"dreams/{name}", exist_ok=True)
 
-    def run(name, fn):
-        s = make_substrate(base, name)
-        return fn(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
+    def run_gemini():
+        s = make_substrate(base, "gemini")
+        return dream_gemini(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
+
+    def run_groq():
+        s = make_substrate(base, "groq")
+        return dream_groq(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
+
+    def run_cerebras():
+        s = make_substrate(base, "cerebras")
+        return dream_cerebras(s)
+
+    def run_mistral():
+        s = make_substrate(base, "mistral")
+        return dream_mistral(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
 
     dreamers = {
-        "gemini":   dream_gemini,
-        "groq":     dream_groq,
-        "cerebras": dream_cerebras,
-        "mistral":  dream_mistral,
+        "gemini":   run_gemini,
+        "groq":     run_groq,
+        "cerebras": run_cerebras,
+        "mistral":  run_mistral,
     }
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {
-            executor.submit(run, name, fn): name
-            for name, fn in dreamers.items()
-        }
+        futures = {executor.submit(fn): name for name, fn in dreamers.items()}
         for future in as_completed(futures):
             name = futures[future]
             try:
