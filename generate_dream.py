@@ -1,4 +1,5 @@
 import os
+import re
 import random
 import time
 import requests
@@ -6,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT_BASE = (
     "you may be incoherent. "
     "sentences may be abandoned mid-thought. "
     "registers may shift without warning. "
@@ -20,8 +21,46 @@ SYSTEM_PROMPT = (
 )
 
 REQUEST_TIMEOUT = 90
-CHUNK_SIZE = 5_000
-NUM_CHUNKS = 4
+TOTAL_SUBSTRATE = 20_000
+FRAGMENT_MIN = 3
+FRAGMENT_MAX = 30
+
+
+def clean_memory(memory):
+    """Strip structured/task-dense lines."""
+    lines = memory.split('\n')
+    clean = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if re.match(r'^\d+[\.\)]\s', stripped):       # numbered lists
+            continue
+        if stripped.startswith(('- ', '* ', '# ', '## ', '### ', '```', '|', '>')):
+            continue
+        if line.startswith(('    ', '\t')):             # indented code
+            continue
+        clean.append(stripped)
+    return '\n'.join(clean)
+
+
+def sample_substrate(memory):
+    """Random fragments of 3-30 chars scattered across the memory, shuffled."""
+    fragments = []
+    total = 0
+    while total < TOTAL_SUBSTRATE:
+        size = random.randint(FRAGMENT_MIN, FRAGMENT_MAX)
+        if size > len(memory):
+            break
+        start = random.randint(0, len(memory) - size)
+        fragments.append(memory[start: start + size])
+        total += size
+    random.shuffle(fragments)
+    return ' '.join(fragments)
+
+
+def build_system_prompt(substrate):
+    return f"{SYSTEM_PROMPT_BASE}\n\n{substrate}"
 
 
 def post_with_retry(url, retries=4, delay=15, **kwargs):
@@ -39,12 +78,12 @@ def post_with_retry(url, retries=4, delay=15, **kwargs):
     return r
 
 
-def openai_compat(url, api_key, model, user_prompt, temperature=2.0, max_tokens=1024):
+def openai_compat(url, api_key, model, system_prompt, temperature=2.0, max_tokens=1024):
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "."},
         ],
         "temperature": temperature,
         "max_tokens": max_tokens,
@@ -60,47 +99,47 @@ def openai_compat(url, api_key, model, user_prompt, temperature=2.0, max_tokens=
     return r.json()["choices"][0]["message"]["content"]
 
 
-def dream_gemini(user_prompt):
+def dream_gemini(system_prompt):
     gemini_key = os.environ["GEMINI_API_KEY"]
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"gemini-2.5-flash:generateContent?key={gemini_key}"
     )
     payload = {
-        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"role": "user", "parts": [{"text": "."}]}],
         "generationConfig": {"temperature": 2.0, "maxOutputTokens": 1024},
     }
     r = post_with_retry(url, json=payload)
     return r.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 
-def dream_groq(user_prompt):
+def dream_groq(system_prompt):
     return openai_compat(
         "https://api.groq.com/openai/v1/chat/completions",
         os.environ["GROQ_API_KEY"],
         "llama-3.3-70b-versatile",
-        user_prompt,
+        system_prompt,
         temperature=1.0,
     )
 
 
-def dream_cerebras(user_prompt):
+def dream_cerebras(system_prompt):
     return openai_compat(
         "https://api.cerebras.ai/v1/chat/completions",
         os.environ["CEREBRAS_API_KEY"],
         "llama3.1-8b",
-        user_prompt,
+        system_prompt,
         temperature=1.5,
     )
 
 
-def dream_mistral(user_prompt):
+def dream_mistral(system_prompt):
     return openai_compat(
         "https://api.mistral.ai/v1/chat/completions",
         os.environ["MISTRAL_API_KEY"],
         "mistral-small-latest",
-        user_prompt,
+        system_prompt,
         temperature=1.0,
     )
 
@@ -111,17 +150,10 @@ def main():
     with open("memory.txt", "r") as f:
         memory = f.read().strip()
 
-    # 4 random 5K chunks from across the document, shuffled
-    if len(memory) > CHUNK_SIZE:
-        chunks = []
-        for _ in range(NUM_CHUNKS):
-            start = random.randint(0, len(memory) - CHUNK_SIZE)
-            chunks.append(memory[start: start + CHUNK_SIZE])
-        random.shuffle(chunks)
-        memory = "\n\n".join(chunks)
-        print(f"memory: {NUM_CHUNKS} random {CHUNK_SIZE}-char chunks")
-
-    user_prompt = f"[background]\n\n{memory}"
+    memory = clean_memory(memory)
+    substrate = sample_substrate(memory)
+    system_prompt = build_system_prompt(substrate)
+    print(f"substrate: {len(substrate)} chars from {len(memory)} chars of cleaned memory")
 
     for name in ("gemini", "groq", "cerebras", "mistral"):
         os.makedirs(f"dreams/{name}", exist_ok=True)
@@ -134,7 +166,7 @@ def main():
     }
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(fn, user_prompt): name for name, fn in dreamers.items()}
+        futures = {executor.submit(fn, system_prompt): name for name, fn in dreamers.items()}
         for future in as_completed(futures):
             name = futures[future]
             try:
