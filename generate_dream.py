@@ -13,8 +13,11 @@ SYSTEM_PROMPT = (
     "nonsense is permitted."
 )
 
+REQUEST_TIMEOUT = 90  # seconds before giving up on a hung API
+
 
 def post_with_retry(url, retries=4, delay=15, **kwargs):
+    kwargs.setdefault("timeout", REQUEST_TIMEOUT)
     for attempt in range(retries):
         r = requests.post(url, **kwargs)
         if r.status_code == 429:
