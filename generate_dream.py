@@ -25,7 +25,6 @@ TOTAL_SUBSTRATE = 20_000
 DREAM_FRAGMENTS = 3_000
 FRAGMENT_MIN = 3
 FRAGMENT_MAX = 30
-MIN_TOKENS = 200
 MAX_TOKENS = 1024
 
 
@@ -105,7 +104,6 @@ def openai_compat(url, api_key, model, system_prompt, temperature=2.0):
             {"role": "user", "content": "."},
         ],
         "temperature": temperature,
-        "min_tokens": MIN_TOKENS,
         "max_tokens": MAX_TOKENS,
     }
     r = post_with_retry(
@@ -130,7 +128,6 @@ def dream_gemini(system_prompt):
         "contents": [{"role": "user", "parts": [{"text": "."}]}],
         "generationConfig": {
             "temperature": 2.0,
-            "minOutputTokens": MIN_TOKENS,
             "maxOutputTokens": MAX_TOKENS,
         },
     }
@@ -186,10 +183,10 @@ def main():
         return fn(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
 
     dreamers = {
-        "gemini": lambda s: dream_gemini(s),
-        "groq":   lambda s: dream_groq(s),
-        "cerebras": lambda s: dream_cerebras(s),
-        "mistral": lambda s: dream_mistral(s),
+        "gemini":   dream_gemini,
+        "groq":     dream_groq,
+        "cerebras": dream_cerebras,
+        "mistral":  dream_mistral,
     }
 
     with ThreadPoolExecutor(max_workers=4) as executor:
