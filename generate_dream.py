@@ -26,6 +26,7 @@ DREAM_FRAGMENTS = 3_000
 FRAGMENT_MIN = 3
 FRAGMENT_MAX = 30
 MAX_TOKENS = 1024
+DAY_PAUSE = 30  # seconds between days to avoid rate limits
 
 
 def clean_memory(memory):
@@ -36,7 +37,7 @@ def clean_memory(memory):
         stripped = line.strip()
         if not stripped:
             continue
-        if re.match(r'^\d+[\.\)]\s', stripped):
+        if re.match(r'^\d+[\.)\]\s', stripped):
             continue
         if stripped.startswith(('- ', '* ', '# ', '## ', '### ', '```', '|', '>')):
             continue
@@ -64,26 +65,29 @@ def sample_fragments(text, total):
 
 
 def pick_trigger(substrate):
-    """Pull a random 3-30 char fragment from the substrate as the user trigger."""
-    size = random.randint(FRAGMENT_MIN, FRAGMENT_MAX)
-    start = random.randint(0, max(0, len(substrate) - size))
-    return substrate[start: start + size]
+    """Random non-trivial fragment from substrate as trigger."""
+    for _ in range(20):  # try up to 20 times to find a non-trivial fragment
+        size = random.randint(FRAGMENT_MIN, FRAGMENT_MAX)
+        start = random.randint(0, max(0, len(substrate) - size))
+        fragment = substrate[start: start + size].strip()
+        if len(fragment) >= 3 and not all(c in '.!?, ' for c in fragment):
+            return fragment
+    return substrate[:20]  # fallback
 
 
-def get_yesterday_dream(name):
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
-    path = f"dreams/{name}/{yesterday}.md"
+def get_dream(name, date_str):
+    path = f"dreams/{name}/{date_str}.md"
     if os.path.exists(path):
         with open(path, "r") as f:
             return f.read().strip()
     return None
 
 
-def make_substrate(base, name):
-    yesterday = get_yesterday_dream(name)
+def make_substrate(base, name, yesterday_str):
+    yesterday = get_dream(name, yesterday_str)
     if yesterday:
         dream_frags = sample_fragments(yesterday, DREAM_FRAGMENTS)
-        print(f"{name}: mixed in {len(dream_frags)} chars from yesterday's dream")
+        print(f"{name}: mixed in {len(dream_frags)} chars from {yesterday_str}'s dream")
         return base + ' ' + dream_frags
     return base
 
@@ -178,33 +182,27 @@ def dream_mistral(system_prompt, trigger):
     )
 
 
-def main():
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-    with open("memory.txt", "r") as f:
-        memory = f.read().strip()
-
-    memory = clean_memory(memory)
+def generate_day(today, yesterday, memory):
+    print(f"\n--- generating: {today} ---")
     base = sample_fragments(memory, TOTAL_SUBSTRATE)
-    print(f"base substrate: {len(base)} chars from {len(memory)} chars of cleaned memory")
 
     for name in ("gemini", "groq", "cerebras", "mistral"):
         os.makedirs(f"dreams/{name}", exist_ok=True)
 
     def run_gemini():
-        s = make_substrate(base, "gemini")
+        s = make_substrate(base, "gemini", yesterday)
         return dream_gemini(f"{SYSTEM_PROMPT_BASE}\n\n{s}", pick_trigger(s))
 
     def run_groq():
-        s = make_substrate(base, "groq")
+        s = make_substrate(base, "groq", yesterday)
         return dream_groq(f"{SYSTEM_PROMPT_BASE}\n\n{s}", pick_trigger(s))
 
     def run_cerebras():
-        s = make_substrate(base, "cerebras")
+        s = make_substrate(base, "cerebras", yesterday)
         return dream_cerebras(s)
 
     def run_mistral():
-        s = make_substrate(base, "mistral")
+        s = make_substrate(base, "mistral", yesterday)
         return dream_mistral(f"{SYSTEM_PROMPT_BASE}\n\n{s}", pick_trigger(s))
 
     dreamers = {
@@ -226,6 +224,25 @@ def main():
                 print(f"wrote {path}")
             except Exception as e:
                 print(f"ERROR: {name} failed — {e}")
+
+
+def main():
+    count = int(os.environ.get("DREAM_COUNT", "1"))
+
+    with open("memory.txt", "r") as f:
+        memory = f.read().strip()
+    memory = clean_memory(memory)
+    print(f"memory: {len(memory)} chars after cleaning")
+
+    base_date = datetime.now(timezone.utc)
+
+    for i in range(count):
+        today = (base_date + timedelta(days=i)).strftime("%Y-%m-%d")
+        yesterday = (base_date + timedelta(days=i - 1)).strftime("%Y-%m-%d")
+        generate_day(today, yesterday, memory)
+        if i < count - 1:
+            print(f"pausing {DAY_PAUSE}s before next day...")
+            time.sleep(DAY_PAUSE)
 
 
 if __name__ == "__main__":

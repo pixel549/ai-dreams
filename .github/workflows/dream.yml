@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 4 * * *'
   workflow_dispatch:
+    inputs:
+      count:
+        description: 'Number of days to generate (default 1)'
+        default: '1'
+        required: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -32,6 +37,7 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          DREAM_COUNT: ${{ inputs.count || '1' }}
         run: python generate_dream.py
 
       - name: Commit dreams
@@ -39,5 +45,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add dreams/
-          git diff --cached --quiet || git commit -m "dream: $(date -u +%Y-%m-%d)"
+          git diff --cached --quiet || git commit -m "dream: $(date -u +%Y-%m-%d) (x${{ inputs.count || '1' }})"
           git push
