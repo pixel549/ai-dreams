@@ -89,7 +89,7 @@ def dream_cerebras(user_prompt):
     return openai_compat(
         "https://api.cerebras.ai/v1/chat/completions",
         os.environ["CEREBRAS_API_KEY"],
-        "llama3.3-70b",
+        "llama3.1-8b",
         user_prompt,
         temperature=1.5,
     )
