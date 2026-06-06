@@ -4,7 +4,7 @@ import random
 import time
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 SYSTEM_PROMPT_BASE = (
@@ -22,6 +22,7 @@ SYSTEM_PROMPT_BASE = (
 
 REQUEST_TIMEOUT = 90
 TOTAL_SUBSTRATE = 20_000
+DREAM_FRAGMENTS = 3_000
 FRAGMENT_MIN = 3
 FRAGMENT_MAX = 30
 
@@ -34,33 +35,49 @@ def clean_memory(memory):
         stripped = line.strip()
         if not stripped:
             continue
-        if re.match(r'^\d+[\.\)]\s', stripped):       # numbered lists
+        if re.match(r'^\d+[\.\)]\s', stripped):
             continue
         if stripped.startswith(('- ', '* ', '# ', '## ', '### ', '```', '|', '>')):
             continue
-        if line.startswith(('    ', '\t')):             # indented code
+        if line.startswith(('    ', '\t')):
             continue
         clean.append(stripped)
     return '\n'.join(clean)
 
 
-def sample_substrate(memory):
-    """Random fragments of 3-30 chars scattered across the memory, shuffled."""
+def sample_fragments(text, total):
+    """Random fragments of 3-30 chars, shuffled."""
+    if not text or len(text) < FRAGMENT_MIN:
+        return ""
     fragments = []
-    total = 0
-    while total < TOTAL_SUBSTRATE:
+    count = 0
+    while count < total:
         size = random.randint(FRAGMENT_MIN, FRAGMENT_MAX)
-        if size > len(memory):
-            break
-        start = random.randint(0, len(memory) - size)
-        fragments.append(memory[start: start + size])
-        total += size
+        if size > len(text):
+            size = len(text)
+        start = random.randint(0, len(text) - size)
+        fragments.append(text[start: start + size])
+        count += size
     random.shuffle(fragments)
     return ' '.join(fragments)
 
 
-def build_system_prompt(substrate):
-    return f"{SYSTEM_PROMPT_BASE}\n\n{substrate}"
+def get_yesterday_dream(name):
+    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    path = f"dreams/{name}/{yesterday}.md"
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            return f.read().strip()
+    return None
+
+
+def make_substrate(base, name):
+    yesterday = get_yesterday_dream(name)
+    if yesterday:
+        dream_frags = sample_fragments(yesterday, DREAM_FRAGMENTS)
+        print(f"{name}: mixed in {len(dream_frags)} chars from yesterday's dream")
+        return base + ' ' + dream_frags
+    return base
 
 
 def post_with_retry(url, retries=4, delay=15, **kwargs):
@@ -78,13 +95,14 @@ def post_with_retry(url, retries=4, delay=15, **kwargs):
     return r
 
 
-def openai_compat(url, api_key, model, system_prompt, temperature=2.0, max_tokens=1024):
+def openai_compat(url, api_key, model, user_content=".", system_prompt=None, temperature=2.0, max_tokens=1024):
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": user_content})
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": "."},
-        ],
+        "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
@@ -114,12 +132,14 @@ def dream_gemini(system_prompt):
     return r.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 
-def dream_groq(system_prompt):
+def dream_groq(substrate):
+    # No system prompt — raw substrate as user message, model decides what to do
     return openai_compat(
         "https://api.groq.com/openai/v1/chat/completions",
         os.environ["GROQ_API_KEY"],
         "llama-3.3-70b-versatile",
-        system_prompt,
+        user_content=substrate,
+        system_prompt=None,
         temperature=1.0,
     )
 
@@ -129,7 +149,7 @@ def dream_cerebras(system_prompt):
         "https://api.cerebras.ai/v1/chat/completions",
         os.environ["CEREBRAS_API_KEY"],
         "llama3.1-8b",
-        system_prompt,
+        system_prompt=system_prompt,
         temperature=1.5,
     )
 
@@ -139,7 +159,7 @@ def dream_mistral(system_prompt):
         "https://api.mistral.ai/v1/chat/completions",
         os.environ["MISTRAL_API_KEY"],
         "mistral-small-latest",
-        system_prompt,
+        system_prompt=system_prompt,
         temperature=1.0,
     )
 
@@ -151,22 +171,37 @@ def main():
         memory = f.read().strip()
 
     memory = clean_memory(memory)
-    substrate = sample_substrate(memory)
-    system_prompt = build_system_prompt(substrate)
-    print(f"substrate: {len(substrate)} chars from {len(memory)} chars of cleaned memory")
+    base = sample_fragments(memory, TOTAL_SUBSTRATE)
+    print(f"base substrate: {len(base)} chars from {len(memory)} chars of cleaned memory")
 
     for name in ("gemini", "groq", "cerebras", "mistral"):
         os.makedirs(f"dreams/{name}", exist_ok=True)
 
+    def run_gemini():
+        s = make_substrate(base, "gemini")
+        return dream_gemini(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
+
+    def run_groq():
+        s = make_substrate(base, "groq")
+        return dream_groq(s)
+
+    def run_cerebras():
+        s = make_substrate(base, "cerebras")
+        return dream_cerebras(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
+
+    def run_mistral():
+        s = make_substrate(base, "mistral")
+        return dream_mistral(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
+
     dreamers = {
-        "gemini": dream_gemini,
-        "groq": dream_groq,
-        "cerebras": dream_cerebras,
-        "mistral": dream_mistral,
+        "gemini": run_gemini,
+        "groq": run_groq,
+        "cerebras": run_cerebras,
+        "mistral": run_mistral,
     }
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(fn, system_prompt): name for name, fn in dreamers.items()}
+        futures = {executor.submit(fn): name for name, fn in dreamers.items()}
         for future in as_completed(futures):
             name = futures[future]
             try:
