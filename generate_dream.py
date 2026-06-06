@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 from datetime import datetime, timezone
 
@@ -11,6 +12,20 @@ SYSTEM_PROMPT = (
     "there is no reader. there is no purpose. "
     "nonsense is permitted."
 )
+
+
+def post_with_retry(url, retries=4, delay=15, **kwargs):
+    for attempt in range(retries):
+        r = requests.post(url, **kwargs)
+        if r.status_code == 429:
+            wait = delay * (2 ** attempt)
+            print(f"429 rate limited — retrying in {wait}s (attempt {attempt + 1}/{retries})")
+            time.sleep(wait)
+            continue
+        r.raise_for_status()
+        return r
+    r.raise_for_status()
+    return r
 
 
 def main():
@@ -35,8 +50,7 @@ def main():
         "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
         "generationConfig": {"temperature": 2.0, "maxOutputTokens": 1024},
     }
-    r = requests.post(url, json=payload)
-    r.raise_for_status()
+    r = post_with_retry(url, json=payload)
     gemini_out = r.json()["candidates"][0]["content"]["parts"][0]["text"]
 
     path = f"dreams/gemini/{today}.md"
@@ -55,7 +69,7 @@ def main():
         "temperature": 2.0,
         "max_tokens": 1024,
     }
-    r = requests.post(
+    r = post_with_retry(
         "https://api.x.ai/v1/chat/completions",
         headers={
             "Authorization": f"Bearer {grok_key}",
@@ -63,7 +77,6 @@ def main():
         },
         json=payload,
     )
-    r.raise_for_status()
     grok_out = r.json()["choices"][0]["message"]["content"]
 
     path = f"dreams/grok/{today}.md"
