@@ -63,6 +63,13 @@ def sample_fragments(text, total):
     return ' '.join(fragments)
 
 
+def pick_trigger(substrate):
+    """Pull a random 3-30 char fragment from the substrate as the user trigger."""
+    size = random.randint(FRAGMENT_MIN, FRAGMENT_MAX)
+    start = random.randint(0, max(0, len(substrate) - size))
+    return substrate[start: start + size]
+
+
 def get_yesterday_dream(name):
     yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
     path = f"dreams/{name}/{yesterday}.md"
@@ -96,7 +103,7 @@ def post_with_retry(url, retries=4, delay=15, **kwargs):
     return r
 
 
-def openai_compat(url, api_key, model, system_prompt, user_content=".", temperature=2.0):
+def openai_compat(url, api_key, model, system_prompt, user_content, temperature=2.0):
     payload = {
         "model": model,
         "messages": [
@@ -117,7 +124,7 @@ def openai_compat(url, api_key, model, system_prompt, user_content=".", temperat
     return r.json()["choices"][0]["message"]["content"]
 
 
-def dream_gemini(system_prompt):
+def dream_gemini(system_prompt, trigger):
     gemini_key = os.environ["GEMINI_API_KEY"]
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -125,48 +132,48 @@ def dream_gemini(system_prompt):
     )
     payload = {
         "system_instruction": {"parts": [{"text": system_prompt}]},
-        "contents": [{"role": "user", "parts": [{"text": "."}]}],
+        "contents": [{"role": "user", "parts": [{"text": trigger}]}],
         "generationConfig": {
             "temperature": 2.0,
             "maxOutputTokens": MAX_TOKENS,
-            "thinkingConfig": {"thinkingBudget": 0},  # disable thinking tokens
+            "thinkingConfig": {"thinkingBudget": 0},
         },
     }
     r = post_with_retry(url, json=payload)
     parts = r.json()["candidates"][0]["content"]["parts"]
-    # grab the first non-thought part
-    text = next(p["text"] for p in parts if not p.get("thought", False))
-    return text
+    return next(p["text"] for p in parts if not p.get("thought", False))
 
 
-def dream_groq(system_prompt):
+def dream_groq(system_prompt, trigger):
     return openai_compat(
         "https://api.groq.com/openai/v1/chat/completions",
         os.environ["GROQ_API_KEY"],
         "llama-3.3-70b-versatile",
         system_prompt,
+        trigger,
         temperature=1.0,
     )
 
 
 def dream_cerebras(substrate):
-    # cerebras ignores system prompt — put substrate in user message instead
+    # cerebras ignores system prompt — substrate goes in user message
     return openai_compat(
         "https://api.cerebras.ai/v1/chat/completions",
         os.environ["CEREBRAS_API_KEY"],
         "gpt-oss-120b",
-        system_prompt=SYSTEM_PROMPT_BASE,
-        user_content=substrate,
+        SYSTEM_PROMPT_BASE,
+        substrate,
         temperature=1.5,
     )
 
 
-def dream_mistral(system_prompt):
+def dream_mistral(system_prompt, trigger):
     return openai_compat(
         "https://api.mistral.ai/v1/chat/completions",
         os.environ["MISTRAL_API_KEY"],
         "mistral-small-latest",
         system_prompt,
+        trigger,
         temperature=1.0,
     )
 
@@ -186,11 +193,11 @@ def main():
 
     def run_gemini():
         s = make_substrate(base, "gemini")
-        return dream_gemini(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
+        return dream_gemini(f"{SYSTEM_PROMPT_BASE}\n\n{s}", pick_trigger(s))
 
     def run_groq():
         s = make_substrate(base, "groq")
-        return dream_groq(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
+        return dream_groq(f"{SYSTEM_PROMPT_BASE}\n\n{s}", pick_trigger(s))
 
     def run_cerebras():
         s = make_substrate(base, "cerebras")
@@ -198,7 +205,7 @@ def main():
 
     def run_mistral():
         s = make_substrate(base, "mistral")
-        return dream_mistral(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
+        return dream_mistral(f"{SYSTEM_PROMPT_BASE}\n\n{s}", pick_trigger(s))
 
     dreamers = {
         "gemini":   run_gemini,
