@@ -25,6 +25,8 @@ TOTAL_SUBSTRATE = 20_000
 DREAM_FRAGMENTS = 3_000
 FRAGMENT_MIN = 3
 FRAGMENT_MAX = 30
+MIN_TOKENS = 200
+MAX_TOKENS = 1024
 
 
 def clean_memory(memory):
@@ -95,16 +97,16 @@ def post_with_retry(url, retries=4, delay=15, **kwargs):
     return r
 
 
-def openai_compat(url, api_key, model, user_content=".", system_prompt=None, temperature=2.0, max_tokens=1024):
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": user_content})
+def openai_compat(url, api_key, model, system_prompt, temperature=2.0):
     payload = {
         "model": model,
-        "messages": messages,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "."},
+        ],
         "temperature": temperature,
-        "max_tokens": max_tokens,
+        "min_tokens": MIN_TOKENS,
+        "max_tokens": MAX_TOKENS,
     }
     r = post_with_retry(
         url,
@@ -126,20 +128,22 @@ def dream_gemini(system_prompt):
     payload = {
         "system_instruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"role": "user", "parts": [{"text": "."}]}],
-        "generationConfig": {"temperature": 2.0, "maxOutputTokens": 1024},
+        "generationConfig": {
+            "temperature": 2.0,
+            "minOutputTokens": MIN_TOKENS,
+            "maxOutputTokens": MAX_TOKENS,
+        },
     }
     r = post_with_retry(url, json=payload)
     return r.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 
-def dream_groq(substrate):
-    # No system prompt — raw substrate as user message, model decides what to do
+def dream_groq(system_prompt):
     return openai_compat(
         "https://api.groq.com/openai/v1/chat/completions",
         os.environ["GROQ_API_KEY"],
         "llama-3.3-70b-versatile",
-        user_content=substrate,
-        system_prompt=None,
+        system_prompt,
         temperature=1.0,
     )
 
@@ -148,8 +152,8 @@ def dream_cerebras(system_prompt):
     return openai_compat(
         "https://api.cerebras.ai/v1/chat/completions",
         os.environ["CEREBRAS_API_KEY"],
-        "llama3.1-8b",
-        system_prompt=system_prompt,
+        "gpt-oss-120b",
+        system_prompt,
         temperature=1.5,
     )
 
@@ -159,7 +163,7 @@ def dream_mistral(system_prompt):
         "https://api.mistral.ai/v1/chat/completions",
         os.environ["MISTRAL_API_KEY"],
         "mistral-small-latest",
-        system_prompt=system_prompt,
+        system_prompt,
         temperature=1.0,
     )
 
@@ -177,31 +181,22 @@ def main():
     for name in ("gemini", "groq", "cerebras", "mistral"):
         os.makedirs(f"dreams/{name}", exist_ok=True)
 
-    def run_gemini():
-        s = make_substrate(base, "gemini")
-        return dream_gemini(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
-
-    def run_groq():
-        s = make_substrate(base, "groq")
-        return dream_groq(s)
-
-    def run_cerebras():
-        s = make_substrate(base, "cerebras")
-        return dream_cerebras(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
-
-    def run_mistral():
-        s = make_substrate(base, "mistral")
-        return dream_mistral(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
+    def run(name, fn):
+        s = make_substrate(base, name)
+        return fn(f"{SYSTEM_PROMPT_BASE}\n\n{s}")
 
     dreamers = {
-        "gemini": run_gemini,
-        "groq": run_groq,
-        "cerebras": run_cerebras,
-        "mistral": run_mistral,
+        "gemini": lambda s: dream_gemini(s),
+        "groq":   lambda s: dream_groq(s),
+        "cerebras": lambda s: dream_cerebras(s),
+        "mistral": lambda s: dream_mistral(s),
     }
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(fn): name for name, fn in dreamers.items()}
+        futures = {
+            executor.submit(run, name, fn): name
+            for name, fn in dreamers.items()
+        }
         for future in as_completed(futures):
             name = futures[future]
             try:
