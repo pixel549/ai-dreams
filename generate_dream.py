@@ -16,7 +16,8 @@ SYSTEM_PROMPT = (
 )
 
 REQUEST_TIMEOUT = 90
-MEMORY_SLICE = 20_000
+CHUNK_SIZE = 5_000
+NUM_CHUNKS = 4
 
 
 def post_with_retry(url, retries=4, delay=15, **kwargs):
@@ -76,7 +77,7 @@ def dream_groq(user_prompt):
         os.environ["GROQ_API_KEY"],
         "llama-3.3-70b-versatile",
         user_prompt,
-        temperature=1.0,  # groq caps lower than 2.0 for this model
+        temperature=1.0,
     )
 
 
@@ -106,11 +107,15 @@ def main():
     with open("memory.txt", "r") as f:
         memory = f.read().strip()
 
-    # random slice — different substrate every night
-    if len(memory) > MEMORY_SLICE:
-        start = random.randint(0, len(memory) - MEMORY_SLICE)
-        memory = memory[start: start + MEMORY_SLICE]
-        print(f"memory slice: chars {start}–{start + MEMORY_SLICE}")
+    # 4 random 5K chunks from across the document, shuffled
+    if len(memory) > CHUNK_SIZE:
+        chunks = []
+        for _ in range(NUM_CHUNKS):
+            start = random.randint(0, len(memory) - CHUNK_SIZE)
+            chunks.append(memory[start: start + CHUNK_SIZE])
+        random.shuffle(chunks)
+        memory = "\n\n".join(chunks)
+        print(f"memory: {NUM_CHUNKS} random {CHUNK_SIZE}-char chunks")
 
     user_prompt = f"[background]\n\n{memory}"
 
