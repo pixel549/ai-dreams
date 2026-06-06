@@ -76,7 +76,7 @@ def dream_groq(user_prompt):
         os.environ["GROQ_API_KEY"],
         "llama-3.3-70b-versatile",
         user_prompt,
-        temperature=2.0,
+        temperature=1.0,  # groq caps lower than 2.0 for this model
     )
 
 
@@ -84,7 +84,7 @@ def dream_cerebras(user_prompt):
     return openai_compat(
         "https://api.cerebras.ai/v1/chat/completions",
         os.environ["CEREBRAS_API_KEY"],
-        "llama-4-scout-17b-16e-instruct",
+        "llama3.3-70b",
         user_prompt,
         temperature=1.5,
     )
@@ -110,7 +110,7 @@ def main():
     if len(memory) > MEMORY_SLICE:
         start = random.randint(0, len(memory) - MEMORY_SLICE)
         memory = memory[start: start + MEMORY_SLICE]
-        print(f"memory slice: chars {start}–{start + MEMORY_SLICE} of {len(memory) + MEMORY_SLICE}")
+        print(f"memory slice: chars {start}–{start + MEMORY_SLICE}")
 
     user_prompt = f"[background]\n\n{memory}"
 
