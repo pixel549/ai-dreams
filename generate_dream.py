@@ -1,4 +1,5 @@
 import os
+import random
 import time
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,6 +16,7 @@ SYSTEM_PROMPT = (
 )
 
 REQUEST_TIMEOUT = 90
+MEMORY_SLICE = 20_000
 
 
 def post_with_retry(url, retries=4, delay=15, **kwargs):
@@ -103,6 +105,12 @@ def main():
 
     with open("memory.txt", "r") as f:
         memory = f.read().strip()
+
+    # random slice — different substrate every night
+    if len(memory) > MEMORY_SLICE:
+        start = random.randint(0, len(memory) - MEMORY_SLICE)
+        memory = memory[start: start + MEMORY_SLICE]
+        print(f"memory slice: chars {start}–{start + MEMORY_SLICE} of {len(memory) + MEMORY_SLICE}")
 
     user_prompt = f"[background]\n\n{memory}"
 
