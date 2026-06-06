@@ -1,0 +1,36 @@
+name: Update Memory
+
+on:
+  push:
+    paths:
+      - 'conversations.json'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Flatten conversations
+        run: python flatten.py conversations.json memory.txt
+
+      - name: Commit memory.txt and remove conversations.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git rm conversations.json
+          git add memory.txt
+          git commit -m "memory: update from conversation export"
+          git push

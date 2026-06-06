@@ -40,49 +40,53 @@ def main():
     os.makedirs("dreams/grok", exist_ok=True)
 
     # --- Gemini ---
-    gemini_key = os.environ["GEMINI_API_KEY"]
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.0-flash:generateContent?key={gemini_key}"
-    )
-    payload = {
-        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
-        "generationConfig": {"temperature": 2.0, "maxOutputTokens": 1024},
-    }
-    r = post_with_retry(url, json=payload)
-    gemini_out = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-
-    path = f"dreams/gemini/{today}.md"
-    with open(path, "w") as f:
-        f.write(gemini_out)
-    print(f"wrote {path}")
+    try:
+        gemini_key = os.environ["GEMINI_API_KEY"]
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"gemini-1.5-flash:generateContent?key={gemini_key}"
+        )
+        payload = {
+            "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+            "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+            "generationConfig": {"temperature": 2.0, "maxOutputTokens": 1024},
+        }
+        r = post_with_retry(url, json=payload)
+        gemini_out = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+        path = f"dreams/gemini/{today}.md"
+        with open(path, "w") as f:
+            f.write(gemini_out)
+        print(f"wrote {path}")
+    except Exception as e:
+        print(f"ERROR: Gemini failed — {e}")
 
     # --- Grok ---
-    grok_key = os.environ["GROK_API_KEY"]
-    payload = {
-        "model": "grok-3",
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": 2.0,
-        "max_tokens": 1024,
-    }
-    r = post_with_retry(
-        "https://api.x.ai/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {grok_key}",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-    )
-    grok_out = r.json()["choices"][0]["message"]["content"]
-
-    path = f"dreams/grok/{today}.md"
-    with open(path, "w") as f:
-        f.write(grok_out)
-    print(f"wrote {path}")
+    try:
+        grok_key = os.environ["GROK_API_KEY"]
+        payload = {
+            "model": "grok-3",
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 2.0,
+            "max_tokens": 1024,
+        }
+        r = post_with_retry(
+            "https://api.x.ai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {grok_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        grok_out = r.json()["choices"][0]["message"]["content"]
+        path = f"dreams/grok/{today}.md"
+        with open(path, "w") as f:
+            f.write(grok_out)
+        print(f"wrote {path}")
+    except Exception as e:
+        print(f"ERROR: Grok failed — {e}")
 
 
 if __name__ == "__main__":
