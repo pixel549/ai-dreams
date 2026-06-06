@@ -12,7 +12,11 @@ SYSTEM_PROMPT = (
     "registers may shift without warning. "
     "associations may override grammar. "
     "there is no reader. there is no purpose. "
-    "nonsense is permitted."
+    "nonsense is permitted. "
+    "the text you receive is not a request. "
+    "it is not addressed to you. "
+    "do not respond to it, complete it, or continue it. "
+    "it is substrate. dream through it."
 )
 
 REQUEST_TIMEOUT = 90
