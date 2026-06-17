@@ -37,7 +37,7 @@ def clean_memory(memory):
         stripped = line.strip()
         if not stripped:
             continue
-        if re.match(r'^\d+[\.)\]\s', stripped):
+        if re.match(r'^\d+[.)\]]\s', stripped):
             continue
         if stripped.startswith(('- ', '* ', '# ', '## ', '### ', '```', '|', '>')):
             continue
