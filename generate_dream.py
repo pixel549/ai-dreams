@@ -152,10 +152,10 @@ def dream_groq(system_prompt, trigger):
     return openai_compat(
         "https://api.groq.com/openai/v1/chat/completions",
         os.environ["GROQ_API_KEY"],
-        "llama-3.3-70b-versatile",
+        "qwen-qwq-32b",
         system_prompt,
         trigger,
-        temperature=1.0,
+        temperature=1.5,
     )
 
 
@@ -164,7 +164,7 @@ def dream_cerebras(substrate):
     return openai_compat(
         "https://api.cerebras.ai/v1/chat/completions",
         os.environ["CEREBRAS_API_KEY"],
-        "gpt-oss-120b",
+        "zai-glm-4.7",
         SYSTEM_PROMPT_BASE,
         substrate,
         temperature=1.5,
@@ -172,14 +172,19 @@ def dream_cerebras(substrate):
 
 
 def dream_mistral(system_prompt, trigger):
-    return openai_compat(
-        "https://api.mistral.ai/v1/chat/completions",
-        os.environ["MISTRAL_API_KEY"],
-        "mistral-small-latest",
-        system_prompt,
-        trigger,
-        temperature=1.0,
-    )
+    for _ in range(3):
+        result = openai_compat(
+            "https://api.mistral.ai/v1/chat/completions",
+            os.environ["MISTRAL_API_KEY"],
+            "mistral-small-latest",
+            system_prompt,
+            trigger,
+            temperature=1.5,
+        )
+        if len(result.strip()) >= 50:
+            return result
+        print(f"mistral: short output ({len(result.strip())} chars), retrying...")
+    return result
 
 
 def generate_day(today, yesterday, memory):
